@@ -1,0 +1,6 @@
+{
+  "name": "tubedial-tests",
+  "private": true,
+  "scripts": { "test": "node engine.test.js && node thumbs.test.js && node popup.test.js" },
+  "devDependencies": { "jsdom": "^24.1.3" }
+}

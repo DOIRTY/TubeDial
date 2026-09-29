@@ -1,0 +1,31 @@
+const {JSDOM}=require('jsdom');const fs=require('fs');
+const src=fs.readFileSync(__dirname+'/../TubeDial/main.js','utf8');
+let pass=0,fail=0;const T=(n,c,x)=>{c?pass++:(fail++,console.log('FAIL',n,x||''))};
+function page(url){const d=new JSDOM('<!doctype html><html><head></head><body></body></html>',{url,runScripts:'outside-only',pretendToBeVisual:true});
+ const w=d.window; w.localStorage.setItem('tubedial_settings',JSON.stringify({shortsThumbH:180,thumbH:180}));
+ try{w.eval(src)}catch(e){console.log('load err',e.message)} return w;}
+const tick=()=>new Promise(r=>setTimeout(r,20));
+(async()=>{
+ let w=page('https://www.youtube.com/shorts/abcdefghijk');let D=w.document;
+ const r=D.createElement('ytd-reel-video-renderer');D.body.appendChild(r);
+ const i1=D.createElement('img');r.appendChild(i1);i1.src='https://i.ytimg.com/vi/abcdefghijk/oar2.jpg';
+ T('shorts player img (attached) kept original',i1.getAttribute('src').includes('/oar2.jpg'),i1.getAttribute('src'));
+ const i2=D.createElement('img');i2.src='https://i.ytimg.com/vi/abcdefghijk/frame0.jpg';
+ const pc=D.createElement('div');pc.className='html5-video-player';D.body.appendChild(pc);pc.appendChild(i2);await tick();
+ T('detached tall img on shorts page kept',i2.getAttribute('src').includes('/frame0.jpg'),i2.getAttribute('src'));
+ const bg=D.createElement('div');bg.className='ytp-cued-thumbnail-overlay-image';pc.appendChild(bg);bg.setAttribute('style','background-image:url("https://i.ytimg.com/vi/abcdefghijk/oardefault.jpg")');await tick();
+ T('player bg kept',bg.style.backgroundImage.includes('oardefault'),bg.style.backgroundImage);
+ const i4=D.createElement('img');i4.src='https://i.ytimg.com/vi/abcdefghijk/hq720.jpg';await tick();
+ const x=D.createElement('div');D.body.appendChild(x);x.appendChild(i4);await tick();
+ T('wide thumb elsewhere on shorts page still lowered',i4.getAttribute('src').includes('hqdefault'),i4.getAttribute('src'));
+ const i8=D.createElement('img');i8.src='https://i.ytimg.com/vi/abcdefghijk/hq720.jpg';r.appendChild(i8);await tick();
+ T('lowered while detached, put back when it lands in the Shorts player',i8.getAttribute('src').includes('/hq720.jpg'),i8.getAttribute('src'));
+ w=page('https://www.youtube.com/');D=w.document;
+ const l=D.createElement('ytm-shorts-lockup-view-model');D.body.appendChild(l);const i5=D.createElement('img');l.appendChild(i5);i5.src='https://i.ytimg.com/vi/abcdefghijk/oar2.jpg';
+ T('home shorts tile still lowered',i5.getAttribute('src').includes('hqdefault'),i5.getAttribute('src'));
+ const i6=D.createElement('img');i6.src='https://i.ytimg.com/vi/abcdefghijk/frame0.jpg';
+ T('home detached tall still lowered',i6.getAttribute('src').includes('hqdefault'),i6.getAttribute('src'));
+ const wp=D.createElement('div');wp.className='html5-video-player';D.body.appendChild(wp);const i7=D.createElement('img');wp.appendChild(i7);i7.src='https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg';
+ T('watch player poster still lowered (unchanged)',i7.getAttribute('src').includes('hqdefault'),i7.getAttribute('src'));
+ console.log(pass+' pass, '+fail+' fail');process.exit(0);
+})();

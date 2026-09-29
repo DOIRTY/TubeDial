@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-accent="green">
+<head>
+<meta charset="utf-8">
+<title>TubeDial</title>
+<script src="theme.js"></script>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="toast" id="toast"></div>
+
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 40 40" width="34" height="34">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" class="s0"/><stop offset="1" class="s1"/>
+          </linearGradient>
+        </defs>
+        <rect x="1" y="1" width="38" height="38" rx="11" class="lbg"/>
+        <path d="M9.5 26.5 A12 12 0 1 1 30.5 26.5" fill="none" stroke="url(#lg)" stroke-width="3.2" stroke-linecap="round"/>
+        <g id="needle" class="needle"><path d="M20 21.5 L20 10.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></g>
+        <circle cx="20" cy="22" r="3.2" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="grow">
+      <h1>TubeDial <span class="for">for YouTube</span></h1>
+      <p class="sub" id="sub">Smart quality for YouTube</p>
+    </div>
+    <button class="icon-btn" id="lookBtn" title="Appearance" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7h2.1A4.4 4.4 0 0 0 21 10.8C21 6.5 17 3 12 3Zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>
+    </button>
+  </header>
+
+  <!-- ============ APPEARANCE (slides open) ============ -->
+  <div class="drawer" id="look">
+    <div class="drawer-in">
+      <div class="card look">
+        <div class="row between"><span class="label">Theme</span></div>
+        <div class="seg" id="theme">
+          <button data-v="system">Auto</button><button data-v="dark">Dark</button><button data-v="light">Light</button>
+        </div>
+        <div class="row between gap"><span class="label">Color</span><span class="small" id="accentName"></span></div>
+        <div class="swatches" id="accents"></div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="seg tabs" id="tabs">
+    <button data-tab="now" class="on">Now</button>
+    <button data-tab="video">Playback</button>
+    <button data-tab="images">Images</button>
+    <button data-tab="dash">Stats</button>
+  </nav>
+
+  <!-- ============ NOW ============ -->
+  <main id="tab-now" class="view">
+    <section class="banner grey" id="banner">
+      <span class="dot"></span>
+      <div class="grow">
+        <div class="bt" id="bTitle">Not watching a video</div>
+        <div class="bd" id="bText">Open a YouTube video or Short.</div>
+      </div>
+      <button class="btn primary sm" id="bBtn" hidden>Reload</button>
+    </section>
+
+    <section class="card" id="ctlCard" hidden>
+      <div class="row between"><span class="label">This video</span><span class="chip kchip" id="kindChip" hidden></span></div>
+      <div class="np" id="npTiles"></div>
+      <p class="hint" id="vidFacts"></p>
+      <div class="sublabel">Resolution &amp; codec</div>
+      <div class="chips autorow" id="autoRow"></div>
+      <div id="matrix"></div>
+      <button class="linkbtn" id="startBtn" hidden></button>
+      <p class="hint" id="ctlHint"></p>
+      <div class="sublabel fpsl">Framerate for this video <em>switches in place</em></div>
+      <div class="chips" id="fpsChips"></div>
+      <p class="hint" id="fpsHint"></p>
+      <button class="linkbtn" id="pvReset" hidden>↺ Reset this video to your defaults</button>
+    </section>
+
+    <section class="card">
+      <div class="row between"><span class="label">Quick setup</span><span class="pill-tag" id="presetNow"></span></div>
+      <div class="presets mini" id="presetsMini"></div>
+      <div class="changes" id="chgNow"></div>
+    </section>
+  </main>
+
+  <!-- ============ PLAYBACK ============ -->
+  <main id="tab-video" class="view" hidden>
+    <section class="card">
+      <span class="label">Quick setup</span>
+      <div class="presets" id="presets"></div>
+      <div class="changes" id="chgPlay"></div>
+      <p class="hint" id="presetHint"></p>
+    </section>
+
+    <div class="seg kinds" id="kinds">
+      <button data-k="video" class="on">Videos</button>
+      <button data-k="shorts">Shorts</button>
+      <button data-k="live">Live</button>
+      <button data-k="embed">Embedded</button>
+    </div>
+    <p class="hint kh" id="kindHint"></p>
+
+    <section class="card" id="cardCodec">
+      <span class="label">Preferred codec</span>
+      <div class="sublabel">1st choice</div>
+      <div class="seg" id="codec1">
+        <button data-v="av1">AV1</button><button data-v="vp9">VP9</button><button data-v="avc">H.264</button><button data-v="auto">Auto</button>
+      </div>
+      <div class="collapse" id="c2wrap">
+        <div class="collapse-in">
+          <div class="sublabel">2nd choice <em>if the video doesn't have the 1st</em></div>
+          <div class="seg" id="codec2">
+            <button data-v="av1">AV1</button><button data-v="vp9">VP9</button><button data-v="avc">H.264</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint">AV1 gives the same picture for the least data, VP9 is in between, H.264 uses the most data but is the easiest for older devices. Auto = YouTube decides. One codec per video: your 1st choice whenever the video has it, even at a single quality (quality never changes the codec — pick the size in YouTube’s ⚙ menu).</p>
+    </section>
+
+    <section class="card" id="cardRes">
+      <div class="row between"><span class="label">Starting quality</span><span class="val" id="resVal"></span></div>
+      <p class="hint mode" id="resModeHint"></p>
+      <input type="range" id="maxRes" min="0" max="8" step="1">
+      <div class="ticks"><span>Auto</span><span>144</span><span>240</span><span>360</span><span>480</span><span>720</span><span>1080</span><span>1440</span><span>Best</span></div>
+      <p class="hint">Only chosen once, when a new video starts — nothing is removed from YouTube’s menu. Shorts have no quality menu, so they simply play at this quality (great for saving data).</p>
+    </section>
+
+    <section class="card" id="cardFps">
+      <div class="row between"><span class="label">Framerate limit</span><span class="val" id="fpsVal"></span></div>
+      <div class="seg" id="maxFps">
+        <button data-v="24">24</button><button data-v="25">25</button><button data-v="30">30</button><button data-v="48">48</button><button data-v="50">50</button><button data-v="60">Any</button>
+      </div>
+      <p class="hint"><b>Heads-up: this one does hide versions.</b> YouTube has no framerate choice, so the only way is to hide the smoother versions (the ⚙ menu then shows “1080p” instead of “1080p60”). Leave it on <b>Any</b> to keep everything. If a video has nothing that low, its lowest is used, so it always plays. You can change it for one video under Now → This video only.</p>
+    </section>
+
+    <section class="card" id="copyCard">
+      <div class="row between"><span class="label" id="copyTitle">Copy to other types</span></div>
+      <p class="hint nomt2">All types are selected; tap one to leave it out. Each shows whether it matches right now.</p>
+      <div class="targets" id="copyTargets"></div>
+      <button class="btn primary block" id="copyBtn">Copy</button>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <span class="label2">On-page notices <em>errors &amp; codec tips</em></span>
+        <label class="switch"><input type="checkbox" id="notices"><span></span></label>
+      </div>
+      <div class="row between gap"><span class="label2">Auto-reload after an error</span><span class="val" id="arVal"></span></div>
+      <input type="range" id="autoReload" min="0" max="4" step="1">
+      <div class="ticks"><span>Never</span><span>3s</span><span>5s</span><span>10s</span><span>15s</span></div>
+    </section>
+  </main>
+
+  <!-- ============ IMAGES ============ -->
+  <main id="tab-images" class="view" hidden>
+    <section class="card" id="cardThumb">
+      <div class="row between"><span class="label">Video thumbnails</span><span class="val" id="thumbVal"></span></div>
+      <input type="range" id="thumb" min="0" max="4" step="1">
+      <div class="ticks"><span>68p</span><span>180p</span><span>270p</span><span>360p</span><span>Original</span></div>
+      <div class="custom"><span>or type any size</span><input type="number" id="thumbC" min="1" max="4320" placeholder="e.g. 120"><span>p</span></div>
+      <div class="cinfo" id="thumbI"></div>
+    </section>
+
+    <section class="card" id="cardSthumb">
+      <div class="row between"><span class="label">Shorts thumbnails</span><span class="val" id="sthumbVal"></span></div>
+      <input type="range" id="sthumb" min="0" max="4" step="1">
+      <div class="ticks"><span>90p</span><span>180p</span><span>360p</span><span>480p</span><span>Original</span></div>
+      <div class="custom"><span>or type any size</span><input type="number" id="sthumbC" min="1" max="4320" placeholder="e.g. 240"><span>p</span></div>
+      <div class="cinfo" id="sthumbI"></div>
+    </section>
+
+    <section class="card" id="cardPrev">
+      <div class="row between"><span class="label">Hover preview videos</span><span class="val" id="prevVal"></span></div>
+      <input type="range" id="prev" min="0" max="7" step="1">
+      <div class="ticks"><span>Off</span><span>144</span><span>240</span><span>360</span><span>480</span><span>720</span><span>1080</span><span>YT</span></div>
+      <div class="custom"><span>or type any size</span><input type="number" id="prevC" min="1" max="4320" placeholder="e.g. 200"><span>p</span></div>
+      <div class="cinfo" id="prevI"></div>
+    </section>
+
+    <section class="card">
+      <div class="trow" id="rowStill">
+        <div class="row between">
+          <span class="label2">Still hover thumbnails</span>
+          <label class="switch"><input type="checkbox" id="still"><span></span></label>
+        </div>
+        <p class="hint nomt">On: moving thumbnails are never downloaded; the still picture already on screen stays, so hovering costs no data.</p>
+      </div>
+      <div class="trow" id="rowChan">
+        <div class="row between">
+          <span class="label2">Smaller channel pictures</span>
+          <label class="switch"><input type="checkbox" id="chan"><span></span></label>
+        </div>
+        <p class="hint nomt">Avatars, channel banners and post pictures at smaller real sizes.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ STATS ============ -->
+  <main id="tab-dash" class="view" hidden>
+    <section class="card">
+      <span class="label">Your device</span>
+      <p class="hint nomt2">What this computer plays smoothly at 1080p. Hardware = smooth and easy on the battery.</p>
+      <div id="devRows"></div>
+    </section>
+    <section class="card">
+      <span class="label">Codec availability</span>
+      <p class="hint" id="dashBasis">Based on the videos you watch.</p>
+      <div id="availBars"></div>
+    </section>
+    <section class="card">
+      <span class="label">What your videos played in</span>
+      <div id="playedBars"></div>
+      <p class="hint" id="prefLine"></p>
+    </section>
+    <section class="card">
+      <span class="label">Other</span>
+      <div id="otherBars"></div>
+      <p class="hint" id="learnLine"></p>
+    </section>
+  </main>
+
+  <div class="apply" id="apply">
+    <span>Apply to this video</span>
+    <button class="btn primary sm" id="applyBtn">Apply</button>
+  </div>
+
+  <footer>
+    <button class="btn ghost sm" id="reset">Reset memory &amp; stats</button>
+    <span class="small" id="ver">No extra requests to YouTube</span>
+  </footer>
+
+<script src="popup.js"></script>
+</body>
+</html>
