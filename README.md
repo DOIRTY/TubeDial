@@ -35,6 +35,8 @@ Found a bug or have an idea? Open an [issue](../../issues). Want to improve it? 
 
 Tests: `cd tests && npm install && npm test`
 
+Made with the help of AI — idea, design, testing and decisions by DOIRTY.
+
 ---
 
 <sub>Not affiliated with YouTube or Google. YouTube is a trademark of Google LLC.</sub>
