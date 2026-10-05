@@ -1,5 +1,5 @@
 const {JSDOM}=require('jsdom');const fs=require('fs');
-const src=fs.readFileSync(__dirname+'/../TubeDial/main.js','utf8');
+const src=require('./harness').SRC;
 let pass=0,fail=0;const T=(n,c,x)=>{c?pass++:(fail++,console.log('FAIL',n,x||''))};
 function page(url){const d=new JSDOM('<!doctype html><html><head></head><body></body></html>',{url,runScripts:'outside-only',pretendToBeVisual:true});
  const w=d.window; w.localStorage.setItem('tubedial_settings',JSON.stringify({shortsThumbH:180,thumbH:180}));

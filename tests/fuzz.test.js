@@ -9,7 +9,7 @@
 //   R3: legacy previewQuality 'off' must mean OFF (-1), not "YouTube default" (0)
 const vm = require('vm'), fs = require('fs');
 const { make, full, PR, T, done } = require('./harness');
-const SRC = fs.readFileSync(__dirname + '/../TubeDial/main.js', 'utf8');
+const SRC = require('./harness').SRC;   // the whole page pipeline, in manifest order
 const ok = (n, c, x) => T(n, !!c, x);
 const tick = (ms = 40) => new Promise(r => setTimeout(r, ms));
 // main.js replaces window.JSON.parse — and the harness feeds it the HOST JSON object, so it
@@ -19,7 +19,7 @@ const cleanJSON = () => { JSON.parse = JP; JSON.stringify = JS; };
 const harnessMake = (s, order, ls) => { const t = make(s, order, ls); cleanJSON(); return t; };
 
 // ---------- a self-contained page context (main.js, no popup, spy on fetch + html flags) ----------
-function makePage(settings, fetchStub) {
+function makePage(settings, fetchStub, extra) {
     function store(init) { const m = new Map(Object.entries(init || {})); return { get length() { return m.size }, key: i => [...m.keys()][i] ?? null, getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; }
     const fakeEl = () => ({ style: {}, children: [], className: '', textContent: '', appendChild(c) { return c; }, addEventListener() { }, remove() { }, attachShadow: fakeEl, querySelector: () => null, hasAttribute: () => false });
     const toggles = [];
@@ -42,6 +42,7 @@ function makePage(settings, fetchStub) {
     Object.defineProperty(win.HTMLImageElement.prototype, 'src', { get() { return ''; }, set(v) { }, configurable: true });
     win.Element.prototype = { setAttribute() { }, removeAttribute() { } };
     win.window = win; win.top = win; win.self = win;
+    if (extra) Object.assign(win, extra);
     vm.createContext(win);
     let err = null; try { vm.runInContext(SRC, win); } catch (e) { err = e; }
     const W = vm.runInContext('window', win);
@@ -49,6 +50,17 @@ function makePage(settings, fetchStub) {
 }
 
 (async () => {
+    // ---------- 0) the manifest IS the pipeline: core first, stages by number, all files real ----------
+    {
+        const EX = __dirname + '/../TubeDial/';
+        const man = JSON.parse(fs.readFileSync(EX + 'manifest.json', 'utf8'));
+        const mains = (man.content_scripts.find(c => c.world === 'MAIN') || {}).js || [];
+        ok('manifest: core.js loads first, then the numbered stages', mains[0] === 'core.js' && mains.length >= 2, mains.join(','));
+        ok('manifest: every pipeline file exists', mains.every(f => fs.existsSync(EX + f)), mains.join(','));
+        ok('manifest: stage files are in ascending order', mains.slice(1).join(',').localeCompare(mains.slice(1).sort().join(',')) === 0, mains.join(','));
+        ok('manifest: version matches the popup expectation', man.version === '1.2.0', man.version);
+    }
+
     // ================================================================
     // 1) hostile settings blob: loads, no throw, no pollution anywhere
     // ================================================================
@@ -187,7 +199,9 @@ function makePage(settings, fetchStub) {
         const data = JSON.parse(JSON.stringify({
             __proto__: { zzz: 1 }, profiles: { video: { codec1: 'hevc', codec2: 'h264', startRes: -99, maxFps: 7 }, shorts: null, live: [], embed: 'no' },
             perVideo: { 'okid1234567': { codec: 'avc', res: 1337, fps: 0 }, 'x': { codec: 'av1' }, '__proto__': { y: 1 } },
-            thumbH: 'lots', shortsThumbH: -5, previewH: 'off', stillHover: 'true', notices: 1, autoReloadSec: 11, evil: 'stays but changes nothing'
+            thumbH: 'lots', shortsThumbH: -5, previewH: 'off', stillHover: 'true', notices: 1, autoReloadSec: 11,
+            audio: { on: 'yes', boostDb: 999, order: ['nope', {}, 'boost'], gate: 'x' },
+            evil: 'stays but changes nothing'
         }));
         let html = fs.readFileSync(D + 'popup.html', 'utf8').replace(/<script src="[^"]+"><\/script>/g, '');
         const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://example.com/' });
@@ -195,7 +209,7 @@ function makePage(settings, fetchStub) {
         w.matchMedia = () => ({ matches: false, addEventListener() { }, addListener() { } });
         w.Element.prototype.scrollIntoView = function () { };
         w.chrome = {
-            runtime: { lastError: null, getManifest: () => ({ version: '1.1.0' }) },
+            runtime: { lastError: null, getManifest: () => ({ version: '1.2.0' }) },
             storage: {
                 local: {
                     get(k, cb) { cb(JSON.parse(JSON.stringify(data))); },
@@ -218,7 +232,12 @@ function makePage(settings, fetchStub) {
         ok('popup migrate: non-id perVideo keys dropped', !data.perVideo || !data.perVideo.x && !('__proto__' in (data.perVideo || {})) || ({}).y === undefined, JSON.stringify(data.perVideo && Object.keys(data.perVideo)));
         const keep = data.perVideo && data.perVideo.okid1234567;
         ok('popup migrate: res 1337 snapped to a real ladder step', keep && (keep.res === 720 || keep.res === 1080) && keep.codec === 'avc' && keep.fps === undefined, JSON.stringify(keep));
-        ok('popup: version line set on the real path', w.document.getElementById('ver').textContent.indexOf('v1.1.0') === 0, w.document.getElementById('ver').textContent);
+        ok('popup: version line set on the real path', w.document.getElementById('ver').textContent.indexOf('v1.2.0') === 0, w.document.getElementById('ver').textContent);
+        const au7 = data.audio || {};
+        ok('popup migrate: hostile audio settings clamped', au7.on === false && au7.boostDb === 20 && au7.order.join(',') === 'boost,clean,stabilize', JSON.stringify(au7));
+        w.eval('document.getElementById("audOn").click()');
+        await tick(120);
+        ok('popup: sound toggle repaints instantly and persists', data.audio && data.audio.on === true && w.eval('document.getElementById("audOn").checked') === true, JSON.stringify(data.audio));
         // batched store(): the UI moved at once; the write landed a moment later
         w.eval('document.getElementById("maxFps").querySelectorAll("button")[0].dispatchEvent(new MouseEvent("click",{bubbles:true}))');
         const instant = w.eval('document.getElementById("fpsVal").textContent');
@@ -226,6 +245,54 @@ function makePage(settings, fetchStub) {
         ok('popup: slider/pill click repaints instantly', /24/.test(instant), instant);
         ok('popup: batched store() persists shortly after', data.profiles && data.profiles.video && data.profiles.video.maxFps === 24, JSON.stringify(data.profiles && data.profiles.video));
         try { w.close(); } catch (e) {}                       // stop the popup's 1s refresh timer
+    }
+
+    // ---------- 9. the audio stage: sanitizing, self-disabling, and the graph it wires ----------
+    {
+        // hostile audio settings must be clamped to what the UI can produce
+        const pa = makePage({ audio: { on: 'yes', boostDb: 999, order: ['nope', {}, 'boost'], gate: 'x' } });
+        const A = vm.runInContext('JSON.stringify(window.__YTLK.S.audio)', pa.win);
+        const au = JSON.parse(A);
+        ok('audio sanitize: hostile toggles never turn it on', au.on === false, A);
+        ok('audio sanitize: boost clamped to the UI range', au.boostDb === 20, au.boostDb);
+        ok('audio sanitize: order keeps only real stages, fills the rest', au.order.length === 3 && au.order[0] === 'boost' && au.order.indexOf('clean') !== -1 && au.order.indexOf('stabilize') !== -1, A);
+
+        // no AudioContext in this browser -> the stage disables itself and says so, engine unaffected
+        const pno = makePage({ audio: { on: true } });
+        pno.send({ __ytld: 'toPage', kind: 'settings', settings: { audio: { on: true } } });
+        const st1 = vm.runInContext('JSON.stringify(window.__YTLK.rt.audio)', pno.win);
+        ok('audio: without an AudioContext it stays off with a reason', pno.err === null && /no-audio-context/.test(st1), st1);
+
+        // with one: the chain is built in the SETTING's order, and re-ordering rewires it
+        const log = [];
+        class N { constructor(k) { this.kind = k; } connect(x) { log.push(this.kind + '->' + x.kind); return x; } disconnect() { log.push('disc:' + this.kind); } }
+        class Ctx {
+            constructor() { this.destination = new N('dest'); this.state = 'running'; }
+            createMediaElementSource() { log.push('newsrc'); return new N('src'); }
+            createGain() { return new N('gain'); }
+            createWaveShaper() { return new N('gate'); }
+            createDynamicsCompressor() { return new N('comp'); }
+            resume() { }
+        }
+        const pg = makePage({ profiles: { video: { codec1: 'av1' } } }, null, { AudioContext: Ctx, Float32Array: Float32Array });
+        const vid = new pg.win.HTMLVideoElement();
+        pg.win.document.getElementById = id => (id === 'movie_player' || id === 'shorts-player') ? { querySelector: s => (s === 'video' ? vid : null) } : null;
+        pg.send({ __ytld: 'toPage', kind: 'settings', settings: { audio: { on: true, order: ['clean', 'stabilize', 'boost'], gate: true, stab: true, boostDb: 6 } } });
+        const g1 = log.filter(e => !/^disc:/.test(e)).join(' ');   // gain->comp is the boost stage's internal limiter link
+        ok('audio: graph = gate→comp→gain(+limiter)→out', g1 === 'newsrc gain->comp src->gate gate->comp comp->gain comp->dest', g1);
+        log.length = 0;
+        pg.send({ __ytld: 'toPage', kind: 'settings', settings: { audio: { on: true, order: ['boost', 'clean', 'stabilize'], gate: true, stab: true, boostDb: 6 } } });
+        const g2 = log.filter(e => !/^disc:/.test(e)).join(' ');
+        ok('audio: re-ordering the chain is just a rewire', g2 === 'gain->comp src->gain comp->gate gate->comp comp->dest', g2);
+        log.length = 0;
+        pg.send({ __ytld: 'toPage', kind: 'settings', settings: { audio: { on: true, order: ['boost', 'clean', 'stabilize'], gate: false, stab: false, boostDb: 0 } } });
+        const g3 = log.filter(e => !/^disc:/.test(e)).join(' ');
+        ok('audio: skipped stages leave only the raw feed', g3 === 'src->dest', g3);
+        log.length = 0;
+        pg.send({ __ytld: 'toPage', kind: 'settings', settings: { audio: { on: false, order: ['clean', 'stabilize', 'boost'], gate: true, stab: true, boostDb: 6 } } });
+        ok('audio: the master off switch bypasses everything', log.filter(e => !/^disc:/.test(e)).join(' ') === 'src->dest', log.join(' '));
+        const st2 = vm.runInContext('JSON.stringify(window.__YTLK.rt.audio)', pg.win);
+        ok('audio: state stays honest about being on/off', /"on":false/.test(st2) && /"err":null/.test(st2), st2);
     }
 
     // ---------- 8. bridge: snapshot push, memory filtering, hostile keys, popup round-trip ----------

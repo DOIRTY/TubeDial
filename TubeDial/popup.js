@@ -17,7 +17,8 @@
     const DEFAULTS = {
         profiles: { video: Object.assign({}, PROFILE), shorts: Object.assign({}, PROFILE), live: Object.assign({}, PROFILE, { codec1: 'auto' }), embed: Object.assign({}, PROFILE) },
         perVideo: {}, thumbH: 270, shortsThumbH: 360, previewH: 360,
-        stillHover: false, channelImages: true, notices: true, autoReloadSec: 5
+        stillHover: false, channelImages: true, notices: true, autoReloadSec: 5,
+        audio: { on: false, order: ['clean', 'stabilize', 'boost'], gate: true, stab: true, boostDb: 0 }
     };
     const PRESET_KEYS = ['profiles', 'thumbH', 'shortsThumbH', 'previewH', 'stillHover', 'channelImages'];
     const RES = [0, 144, 240, 360, 480, 720, 1080, 1440, 4320];   // 0 = YouTube decides, 4320 = best
@@ -172,6 +173,23 @@
     function sanFps(v, dflt) { const n = +v; if (!isFinite(n) || n <= 0) return dflt; return n >= 60 ? 60 : floorIn(n, FPS_SET, FPS_SET[0]); }
     function sanAuto(v, dflt) { const n = sanNum(v, 0, 1e9, dflt); return n >= 15 ? 15 : n >= 1 ? floorIn(n, AR_SET, AR_SET[0]) : 0; }
     const CODECS = { av1: 1, vp9: 1, avc: 1 };
+    const AUD_STAGES = ['clean', 'stabilize', 'boost'];           // same rules as the page engine's sanitizer
+    function sanAud(base, src) {
+        const q = { on: !!base.on, order: base.order.slice(), gate: !!base.gate, stab: !!base.stab, boostDb: base.boostDb };
+        if (src && typeof src === 'object') {
+            q.on = typeof src.on === 'boolean' ? src.on : q.on;
+            q.gate = typeof src.gate === 'boolean' ? src.gate : q.gate;
+            q.stab = typeof src.stab === 'boolean' ? src.stab : q.stab;
+            q.boostDb = sanNum(src.boostDb, 0, 20, q.boostDb);                        // 0..20 dB — the slider's own range
+            if (Array.isArray(src.order)) {                                            // a permutation of the known stages
+                const seen = {}, o = [];
+                src.order.forEach(function (n) { if (AUD_STAGES.indexOf(n) !== -1 && !seen[n]) { seen[n] = 1; o.push(n); } });
+                AUD_STAGES.forEach(function (n) { if (!seen[n]) o.push(n); });
+                q.order = o;
+            }
+        }
+        return q;
+    }
     function sanProf(base, src) {
         const q = { codec1: base.codec1, codec2: base.codec2, startRes: base.startRes, maxFps: base.maxFps };
         if (src && typeof src === 'object') {
@@ -204,6 +222,7 @@
         o.channelImages = typeof s.channelImages === 'boolean' ? s.channelImages : DEFAULTS.channelImages;
         o.notices = typeof s.notices === 'boolean' ? s.notices : DEFAULTS.notices;
         o.autoReloadSec = sanAuto(s.autoReloadSec, DEFAULTS.autoReloadSec);
+        o.audio = sanAud(DEFAULTS.audio, s.audio);
         let pr = (s.profiles && typeof s.profiles === 'object') ? s.profiles : null;
         if (!pr && (s.codec1 || s.maxRes || s.maxFps || s.av1 === false)) {
             const b = { codec1: s.codec1 || (s.av1 === false ? 'auto' : 'av1'), codec2: s.codec2 || 'vp9', maxRes: s.maxRes, maxFps: s.maxFps };
@@ -251,6 +270,7 @@
         if (Object.keys(o.perVideo).length !== Math.min(keys.length, 5000)) pvChanged = true;
         if (pvChanged) patch.perVideo = o.perVideo;
         ['stillHover', 'channelImages', 'notices', 'autoReloadSec'].forEach(function (k) { if (s[k] !== undefined && s[k] !== o[k]) patch[k] = o[k]; });   // normalize garbage in storage once, quietly
+        if (s.audio !== undefined && JSON.stringify(s.audio) !== JSON.stringify(o.audio)) patch.audio = o.audio;   // objects need a content check, not identity
         if (s.thumbH !== undefined && s.thumbH !== o.thumbH) patch.thumbH = o.thumbH;
         if (s.shortsThumbH !== undefined && s.shortsThumbH !== o.shortsThumbH) patch.shortsThumbH = o.shortsThumbH;
         if (s.previewH !== undefined && s.previewH !== o.previewH) patch.previewH = o.previewH;
@@ -614,6 +634,7 @@
         setText($('arVal'), AR[ai] ? AR[ai] + ' seconds' : 'Never (button only)');
         $('autoReload').disabled = !S.notices;
         renderImages(anim);
+        renderSound();
         renderPresets();
         renderCopy(anim);
         if (lastSt) renderCtl(lastSt);
@@ -1030,6 +1051,53 @@
     customInput('thumbC', 'thumbH'); customInput('sthumbC', 'shortsThumbH'); customInput('prevC', 'previewH');
     $('still').addEventListener('change', function () { manualEdit(); store({ stillHover: this.checked }); renderSettings(false); });
     $('chan').addEventListener('change', function () { manualEdit(); store({ channelImages: this.checked }); renderSettings(false); });
+
+    // ---------- sound chain (processed in the page, locally; the order is just data) ----------
+    const AUD = { clean: ['Quiet-cut (soft gate)', 'gate', 'Softer hiss between speech: very quiet parts fade down. A gate, not AI noise removal.'],
+                  stabilize: ['Leveler (compressor)', 'stab', 'Quiet parts up, loud parts down, so volume swings shrink.'],
+                  boost: ['Boost + limiter', null, 'Turns it up into a brick-wall limiter: extra loudness without clipping.'] };
+    function renderSound() {
+        const on = $('audOn'); if (!on || !$('audStages')) return;
+        const A = S.audio || DEFAULTS.audio;
+        on.checked = !!A.on;
+        $('audBoost').value = Math.min(20, Math.max(0, +A.boostDb || 0));
+        setText($('audBoostVal'), (+A.boostDb || 0) <= 0 ? 'Off' : '+' + (+A.boostDb) + ' dB');
+        const box = $('audStages'); clear(box);
+        (A.order && A.order.length ? A.order : DEFAULTS.audio.order).forEach(function (n, i) {
+            const info = AUD[n]; if (!info) return;
+            const r = mk('div', 'row between');
+            const lab = mk('span', 'label2', (i + 1) + '. ' + info[0]); lab.title = info[2];
+            r.appendChild(lab);
+            const act = mk('span');
+            if (info[1]) {
+                const t = mk('button', 'btn sm' + (A[info[1]] ? ' on' : ''), A[info[1]] ? 'On' : 'Off');
+                t.dataset.st = n; t.dataset.act = 'tg'; t.title = 'Include or skip this stage'; act.appendChild(t);
+            }
+            if (i > 0) {
+                const m = mk('button', 'btn sm', 'First'); m.dataset.st = n; m.dataset.act = 'first'; m.title = 'Run this stage first'; act.appendChild(m);
+            }
+            r.appendChild(act);
+            box.appendChild(r);
+        });
+        setRich($('audOrder'), '<b>' + (A.order || DEFAULTS.audio.order).join('</b> → <b>') + '</b>');
+        const note = $('audNote'); if (note) note.hidden = !!A.on;
+    }
+    $('audOn').addEventListener('change', function () {
+        const A = clone(S.audio || DEFAULTS.audio); A.on = !!this.checked;
+        manualEdit(); store({ audio: A }); renderSettings(false);
+    });
+    $('audBoost').addEventListener('input', function () {
+        const A = clone(S.audio || DEFAULTS.audio); A.boostDb = Math.min(20, Math.max(0, +this.value || 0));
+        store({ audio: A });
+        setText($('audBoostVal'), A.boostDb <= 0 ? 'Off' : '+' + A.boostDb + ' dB');
+    });
+    $('audStages').addEventListener('click', function (e) {
+        const b = e.target && e.target.closest && e.target.closest('button'); if (!b) return;
+        const A = clone(S.audio || DEFAULTS.audio), n = b.dataset.st;
+        if (b.dataset.act === 'tg') { const key = AUD[n] && AUD[n][1]; if (key) A[key] = !A[key]; }
+        else if (b.dataset.act === 'first') { A.order = [n].concat((A.order || DEFAULTS.audio.order).filter(function (x) { return x !== n; })); }
+        manualEdit(); store({ audio: A }); renderSettings(false);
+    });
     $('autoRow').addEventListener('click', function (e) { const b = e.target.closest('button'); if (b) qualityPick('auto'); });
     $('matrix').addEventListener('click', function (e) {
         const b = e.target.closest('button'); if (!b || b.disabled || !lastSt) return;

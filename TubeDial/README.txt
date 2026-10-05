@@ -1,4 +1,4 @@
-TubeDial — Smart Quality for YouTube   v1.1 (Brave / Chrome / Firefox extension)
+TubeDial — Smart Quality for YouTube   v1.2 (Brave / Chrome / Firefox extension)
 =====================================================================
 
 Same quality for less data, smoother playback on older computers, or
@@ -103,6 +103,17 @@ IMAGES: CUSTOM SIZES THAT REALLY SAVE DATA
  Still hover thumbnails: ON = the moving pictures in search results are
    never downloaded; the tile keeps the still picture that's already on
    screen, so hovering costs zero data.
+
+SOUND CHAIN (Images tab, off by default)
+ Three small audio stages for the player, processed locally in the page:
+ "Quiet-cut" is a soft gate (very quiet hiss between speech fades down — it
+ is a gate, not AI noise removal), "Leveler" is a compressor that brings
+ quiet parts up and loud parts down, "Boost" turns the volume up into a
+ limiter so it doesn't clip. Each stage can be switched off, and the popup
+ can put any of them FIRST: the chain is rebuilt in the order you choose.
+ Turning the whole chain off leaves YouTube's audio exactly as it is.
+ If another tool already owns the player's audio, TubeDial notices and
+ steps aside instead of fighting over it.
 
 ON-PAGE NOTICES
  - A video fails to start in your codec -> notice with a countdown,

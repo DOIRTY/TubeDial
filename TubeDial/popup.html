@@ -196,6 +196,22 @@
         <p class="hint nomt">Avatars, channel banners and post pictures at smaller real sizes.</p>
       </div>
     </section>
+
+    <!-- ============ SOUND CHAIN ============ -->
+    <section class="card" id="cardSound">
+      <div class="trow">
+        <div class="row between">
+          <span class="label2"><b>Sound chain</b> — processed locally, in the page</span>
+          <label class="switch"><input type="checkbox" id="audOn"><span></span></label>
+        </div>
+        <p class="hint nomt" id="audNote">Off: the player's audio is left exactly as YouTube made it. Nothing is ever sent anywhere.</p>
+      </div>
+      <div class="row between"><span class="label2">Volume boost</span><span class="val" id="audBoostVal"></span></div>
+      <input type="range" id="audBoost" min="0" max="20" step="1">
+      <div class="row between" style="margin-top:8px"><span class="label">Stage order</span><span class="val" id="audOrder"></span></div>
+      <div id="audStages"></div>
+      <p class="hint nomt">"First" moves a stage to the head of the chain; On/Off includes or skips it. The page engine rebuilds the graph from this list — add a stage by adding a file, see PIPELINE.md.</p>
+    </section>
   </main>
 
   <!-- ============ STATS ============ -->

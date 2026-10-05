@@ -1,4 +1,4 @@
-// Bridge between the popup (extension world) and main.js (page world).
+// Bridge between the popup (extension world) and the page engine (MAIN world).
 // It only moves settings / diagnostics / memory between them — it never contacts YouTube.
 // Made with the help of AI.
 (function () {
@@ -17,7 +17,7 @@
     function push(all) {
         SNAP = all || {};
         const s = settingsOnly(SNAP);
-        try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}      // main.js reads this instantly next page load
+        try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}      // the page engine reads this instantly next page load
         try { window.postMessage({ __ytld: 'toPage', kind: 'settings', settings: s }, ORIGIN); } catch (e) {}
     }
     chrome.storage.local.get(null, push);

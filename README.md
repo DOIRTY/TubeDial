@@ -12,6 +12,8 @@
 - **Framerate limit** — e.g. 30 fps for slower computers.
 - **Now tab** — see and switch the current video's codec, quality and framerate, without refreshing.
 - **Lighter images** — smaller thumbnails and hover previews, or turn previews off.
+- **Sound chain** — optional local-only audio stages (soft gate → leveler → boost into a
+  limiter), each one includable and reorderable right from the popup. Nothing is sent anywhere.
 - **Presets** — Smart, Data saver, Max savings, Best quality, Smooth.
 
 ## Install
@@ -38,6 +40,11 @@ Found a bug or have an idea? Open an [issue](../../issues). Want to improve it? 
 
 Tests: `cd tests && npm install && npm test` (engine, thumbnails, popup and fuzz suites — hostile
 settings, corrupt storage and parser input get checked there too; all suites must end with `0 fail`).
+The test harness loads exactly the stage list from `manifest.json`, so the pipeline is under test
+as a pipeline.
+
+Architecture: the page engine is `core.js` + numbered stages under `engine/` — adding, reordering
+or removing one stage is a manifest edit, see [PIPELINE.md](PIPELINE.md).
 
 Made with the help of AI — idea, design, testing and decisions by DOIRTY.
 

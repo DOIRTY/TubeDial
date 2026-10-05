@@ -1,5 +1,9 @@
 const vm=require('vm'), fs=require('fs');
-const SRC=fs.readFileSync(__dirname+'/../TubeDial/main.js','utf8');
+const EXTDIR=__dirname+'/../TubeDial';
+// the page pipeline = exactly the MAIN-world scripts, in manifest order (core first, then the stages)
+const MANI=JSON.parse(fs.readFileSync(EXTDIR+'/manifest.json','utf8'));
+const MAIN_JS=((MANI.content_scripts.find(s=>s.world==='MAIN')||{}).js)||[];
+const SRC=MAIN_JS.map(f=>fs.readFileSync(EXTDIR+'/'+f,'utf8')).join('\n;\n');
 function store(init){const m=new Map(Object.entries(init||{}));return{get length(){return m.size},key:i=>[...m.keys()][i]??null,getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k)};}
 function adblock(win){const o=Object.getOwnPropertyDescriptor(win,'ytInitialPlayerResponse');const pg=o&&o.get,ps=o&&o.set;let v;
  Object.defineProperty(win,'ytInitialPlayerResponse',{configurable:true,get(){if(pg)pg.call(win);return v},set(a){if(ps)ps.call(win,a);v=a;if(a)delete a.adPlacements}});}
@@ -55,4 +59,4 @@ const PR=(o)=>({profiles:o});
 let ok=0,bad=0;const T=(n,c,x)=>{c?ok++:bad++;console.log((c?'PASS ':'FAIL ')+n+(x!==undefined?'  ['+x+']':''))};
 const go=(s,id,resp,q,codec,path)=>{const t=make(s); t.tick(); if(path==='shorts') t.nav('/shorts/'+id); else t.nav('/watch','?v='+id); t.player.pr=resp(id); t.player.q=q; t.win.MediaSource.prototype.addSourceBuffer(codec||'video/mp4; codecs="av01.0.05M.08"'); t.tick(); return t;};
 const done=()=>{console.log(ok+' pass, '+bad+' fail'); process.exitCode=bad?1:0;};
-module.exports={make,F,A,full,film,short,mixed,show,load,PR,T,go,done,vm};
+module.exports={SRC,SRCFILES:MAIN_JS,make,F,A,full,film,short,mixed,show,load,PR,T,go,done,vm};
