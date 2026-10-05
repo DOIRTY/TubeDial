@@ -16,12 +16,13 @@
 
 ## Install
 
-1. Download **TubeDial-v1.0.zip** from [Releases](../../releases/latest) and unzip it.
+1. Download the latest **TubeDial release zip** from [Releases](../../releases/latest) and unzip it.
 2. Open `brave://extensions` (or `chrome://extensions`).
 3. Turn on **Developer mode**.
 4. Click **Load unpacked** and select the **TubeDial** folder.
+5. Firefox: open `about:debugging`, "Load Temporary Add-on…" and pick `TubeDial/manifest.json`.
 
-Works in Brave, Chrome, Edge, Opera and Vivaldi on computers.
+Works in Brave, Chrome, Edge, Opera and Vivaldi on computers, and in Firefox 114+ (temporary add-on).
 
 ## Privacy
 
@@ -33,7 +34,8 @@ It doesn't block ads or download videos — it only chooses among the formats Yo
 Free for everyone: use it, change it, fix it, share it — no rules ([public domain](LICENSE)).
 Found a bug or have an idea? Open an [issue](../../issues). Want to improve it? Send a pull request.
 
-Tests: `cd tests && npm install && npm test`
+Tests: `cd tests && npm install && npm test` (engine, thumbnails, popup and fuzz suites — hostile
+settings, corrupt storage and parser input get checked there too; all suites must end with `0 fail`).
 
 Made with the help of AI — idea, design, testing and decisions by DOIRTY.
 

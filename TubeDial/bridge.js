@@ -1,25 +1,37 @@
 // Bridge between the popup (extension world) and main.js (page world).
 // It only moves settings / diagnostics / memory between them — it never contacts YouTube.
+// Made with the help of AI.
 (function () {
     'use strict';
     const KEY = 'ytld_settings';
     const MEM = 'ytldMemory';
     const ORIGIN = location.origin;
+    let SNAP = {};                                                 // storage mirror, kept via the change events
+    const junkKey = function (k) { return k === '__proto__' || k === 'constructor' || k === 'prototype'; };
 
     function settingsOnly(all) {
-        const s = Object.assign({}, all || {});
-        delete s[MEM];
+        const s = {};
+        for (const k in all) if (k !== MEM && !junkKey(k)) s[k] = all[k];   // the memory map is for the popup only; hostile prototype keys never get copied
         return s;
     }
     function push(all) {
-        const s = settingsOnly(all);
+        SNAP = all || {};
+        const s = settingsOnly(SNAP);
         try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}      // main.js reads this instantly next page load
-        window.postMessage({ __ytld: 'toPage', kind: 'settings', settings: s }, ORIGIN);
+        try { window.postMessage({ __ytld: 'toPage', kind: 'settings', settings: s }, ORIGIN); } catch (e) {}
     }
     chrome.storage.local.get(null, push);
     chrome.storage.onChanged.addListener(function (changes, area) {
-        if (area !== 'local') return;
-        if (Object.keys(changes).some(function (k) { return k !== MEM; })) chrome.storage.local.get(null, push);
+        if (area !== 'local' || !changes) return;
+        let touched = false;
+        for (const k in changes) {
+            if (k === MEM) continue;                              // dashboard data alone: nothing to push
+            if (junkKey(k)) { delete SNAP[k]; continue; }                        // never let a prototype key retarget the mirror
+            touched = true;
+            const nv = changes[k].newValue;
+            if (nv === undefined) delete SNAP[k]; else SNAP[k] = nv;            // no re-fetch: the event carries the new value
+        }
+        if (touched) push(SNAP);
     });
 
     let seq = 0;

@@ -1,6 +1,7 @@
 // TubeDial — Smart Quality for YouTube — page engine (runs in the page at document start).
 // Picks, among the formats YouTube ALREADY offers, the one matching your
 // codec order + resolution + framerate choices. Makes ZERO extra requests.
+// Made with the help of AI.
 (function () {
     'use strict';
     if (window.__ytldLoaded) return;
@@ -33,41 +34,93 @@
         notices: true,                       // small on-page notices
         autoReloadSec: 5                     // error notice countdown (0 = never reload by itself)
     };
+    // ---- sanitizer: settings can come from storage, a postMessage or a legacy migration, so they
+    // are treated as hostile input: only DEFAULTS' own keys survive, enums are whitelisted,
+    // numbers are rounded and clamped to values the UI itself could ever produce, and the result
+    // is built fresh (an own __proto__ key or getter can never reach S or poison anything).
+    // merge(merge(x)) === merge(x): clamping is idempotent, so a round-trip never drifts.
+    const RES_SET = [144, 240, 360, 480, 720, 1080, 1440, 2160, 4320];
+    const FPS_SET = [24, 25, 30, 48, 50, 60];
+    const AR_SET = [3, 5, 10, 15];
+    function sanNum(v, lo, hi, dflt) { const n = +v; if (!isFinite(n)) return dflt; const r = Math.round(n); return r < lo ? lo : r > hi ? hi : r; }
+    function floorIn(n, set, low) { for (let i = set.length - 1; i >= 0; i--) if (set[i] <= n) return set[i]; return low; }
+    function sanRes(v) { const n = sanNum(v, 0, 1e9, 0); return n <= 0 ? 0 : floorIn(n, RES_SET, RES_SET[0]); }   // 0 = YouTube decides
+    function sanFps(v, dflt) { const n = +v; if (!isFinite(n) || n <= 0) return dflt; return n >= 60 ? 60 : floorIn(n, FPS_SET, FPS_SET[0]); }
+    function sanAuto(v, dflt) { const n = sanNum(v, 0, 1e9, dflt); return n >= 15 ? 15 : n >= 1 ? floorIn(n, AR_SET, AR_SET[0]) : 0; }
+    function sanProf(base, src) {
+        const q = { codec1: base.codec1, codec2: base.codec2, startRes: base.startRes, maxFps: base.maxFps };
+        if (src && typeof src === 'object') {
+            if (src.codec1 === 'auto' || BIT[src.codec1]) q.codec1 = src.codec1;
+            if (BIT[src.codec2]) q.codec2 = src.codec2;
+            const lim = +src.maxRes;                                                    // v1/v2: a limit becomes a start quality
+            if (src.startRes !== undefined) q.startRes = sanRes(src.startRes);
+            else if (isFinite(lim) && lim > 0) q.startRes = sanRes(lim);
+            q.maxFps = sanFps(src.maxFps, q.maxFps);
+        }
+        return q;
+    }
     function merge(s) {
-        const o = Object.assign({}, DEFAULTS, s || {});
-        if (!o.perVideo || typeof o.perVideo !== 'object') o.perVideo = {};
-        if (s && s.thumbH === undefined && s.thumbQuality) o.thumbH = ({ '70p': 68, '180p': 180, '270p': 270, '360p': 360, 'original': 0 })[s.thumbQuality] ?? DEFAULTS.thumbH;
-        if (s && s.shortsThumbH === undefined && s.shortsThumbQuality) o.shortsThumbH = ({ '90p': 90, '180p': 180, '360p': 360, '480p': 480, 'original': 0 })[s.shortsThumbQuality] ?? DEFAULTS.shortsThumbH;
-        if (s && s.previewH === undefined && s.previewQuality) o.previewH = ({ '144p': 144, '240p': 240, '360p': 360, '480p': 480, '720p': 720, 'off': 0 })[s.previewQuality] ?? DEFAULTS.previewH;
-        let pr = s && s.profiles && typeof s.profiles === 'object' ? s.profiles : null;
-        if (!pr && s && (s.codec1 || s.maxRes || s.maxFps || s.av1 === false)) {        // v1/v2 migration
-            const b = { codec1: s.codec1 || (s.av1 === false ? 'auto' : 'av1'), codec2: s.codec2 || 'vp9', maxRes: +s.maxRes || 0, maxFps: +s.maxFps || 60 };
+        s = (s && typeof s === 'object') ? s : {};
+        const o = {};
+        let th = s.thumbH;                                                              // legacy named steps
+        if (th === undefined && s.thumbQuality) th = ({ '70p': 68, '180p': 180, '270p': 270, '360p': 360, 'original': 0 })[s.thumbQuality] ?? DEFAULTS.thumbH;
+        th = sanNum(th, -1e9, 99999, DEFAULTS.thumbH); o.thumbH = th < 0 ? DEFAULTS.thumbH : th;   // 0 = original; negatives are junk
+        let sth = s.shortsThumbH;
+        if (sth === undefined && s.shortsThumbQuality) sth = ({ '90p': 90, '180p': 180, '360p': 360, '480p': 480, 'original': 0 })[s.shortsThumbQuality] ?? DEFAULTS.shortsThumbH;
+        sth = sanNum(sth, -1e9, 99999, DEFAULTS.shortsThumbH); o.shortsThumbH = sth < 0 ? DEFAULTS.shortsThumbH : sth;
+        let pv = s.previewH;
+        if (pv === undefined && s.previewQuality) pv = ({ '144p': 144, '240p': 240, '360p': 360, '480p': 480, '720p': 720, 'off': -1 })[s.previewQuality] ?? DEFAULTS.previewH;
+        pv = sanNum(pv, -1e9, 99999, DEFAULTS.previewH);                                 // -1 = off, 0 = YouTube default
+        o.previewH = (pv === -1 || pv >= 0) ? pv : DEFAULTS.previewH;
+        o.stillHover = typeof s.stillHover === 'boolean' ? s.stillHover : DEFAULTS.stillHover;
+        o.channelImages = typeof s.channelImages === 'boolean' ? s.channelImages : DEFAULTS.channelImages;
+        o.notices = typeof s.notices === 'boolean' ? s.notices : DEFAULTS.notices;
+        o.autoReloadSec = sanAuto(s.autoReloadSec, DEFAULTS.autoReloadSec);
+        let pr = (s.profiles && typeof s.profiles === 'object') ? s.profiles : null;
+        if (!pr && (s.codec1 || s.maxRes || s.maxFps || s.av1 === false)) {             // v1/v2 migration
+            const b = { codec1: s.codec1 || (s.av1 === false ? 'auto' : 'av1'), codec2: s.codec2 || 'vp9', maxRes: s.maxRes, maxFps: s.maxFps };
             pr = { video: b, shorts: b, embed: b, live: Object.assign({}, b, { codec1: 'auto' }) };
         }
         o.profiles = {};
-        KINDS.forEach(function (k) {
-            const q = Object.assign({}, DEFAULTS.profiles[k], (pr && pr[k]) || {});
-            if (pr && pr[k] && pr[k].startRes === undefined && +pr[k].maxRes > 0) q.startRes = +pr[k].maxRes;   // old limit -> start quality
-            o.profiles[k] = q;
-        });
-        if (s && s.perVideoFps && typeof s.perVideoFps === 'object') {          // v1 migration
-            Object.keys(s.perVideoFps).forEach(function (k) { if (!o.perVideo[k]) o.perVideo[k] = { fps: s.perVideoFps[k] }; });
+        KINDS.forEach(function (k) { o.profiles[k] = sanProf(DEFAULTS.profiles[k], pr && pr[k]); });
+        o.perVideo = {};
+        const pvs = (s.perVideo && typeof s.perVideo === 'object') ? s.perVideo : null;
+        const pvf = (s.perVideoFps && typeof s.perVideoFps === 'object') ? s.perVideoFps : null;   // v1 migration
+        if (pvs) {
+            const keys = Object.keys(pvs);
+            keys.slice(Math.max(0, keys.length - 5000)).forEach(function (k) {          // keep the newest 5000, id-shaped keys only
+                if (!ID_RE.test(k)) return;
+                const e = pvs[k];
+                if (!e || typeof e !== 'object') return;
+                const q = {};
+                if (BIT[e.codec]) q.codec = e.codec;
+                const r = sanRes(e.res); if (r > 0) q.res = r;
+                const fr = +e.fps; if (isFinite(fr) && fr >= 1) q.fps = Math.min(240, Math.round(fr));   // 0/absent = "no override"
+                if (q.codec || q.res || q.fps) o.perVideo[k] = q;
+            });
+        }
+        if (pvf) {
+            Object.keys(pvf).slice(0, 5000).forEach(function (k) {
+                if (!ID_RE.test(k) || o.perVideo[k]) return;
+                const fr = +pvf[k];
+                if (isFinite(fr) && fr >= 1) o.perVideo[k] = { fps: Math.min(240, Math.round(fr)) };
+            });
         }
         return o;
     }
-    let S = (function () { try { return merge(JSON.parse(localStorage.getItem('ytld_settings'))); } catch (e) { return merge(null); } })();
 
     const FAM = ['av1', 'vp9', 'avc'];
     const NAME = { av1: 'AV1', vp9: 'VP9', avc: 'H.264' };
     const BIT = { av1: 1, vp9: 2, avc: 4 };
     const KNOWN = 16, WATCHED = 32;
     const PLAYED = { av1: 64, vp9: 128, avc: 256 }, PLAYED_ALL = 64 | 128 | 256;
-    const NOHINT = { av1: 512, vp9: 1024, avc: 2048 }, HINT_ALL = 512 | 1024 | 2048;
+    const NOHINT = { av1: 512, vp9: 1024, avc: 2048 };
     const HFR = 4096, UHD = 8192;             // has >30fps / has 2160p+
     const Q2H = { tiny: 144, small: 240, medium: 360, large: 480, hd720: 720, hd1080: 1080, hd1440: 1440, hd2160: 2160, highres: 4320 };
 
     const ID_RE = /^[A-Za-z0-9_-]{11}$/;
-    const URL_VID_RE = /(?:[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/;
+    const URL_VID_RE = /(?:[?&]v=|\/shorts\/|\/embed\/|\/live\/|youtu\.be\/)([A-Za-z0-9_-]{11})/;
+    let S = (function () { try { return merge(JSON.parse(localStorage.getItem('ytld_settings'))); } catch (e) { return merge(null); } })();
     function curVid() { try { const m = location.href.match(URL_VID_RE); return m ? m[1] : null; } catch (e) { return null; } }
     function onShorts() { return location.pathname.indexOf('/shorts/') === 0; }
     function playerEl() { try { return document.getElementById(onShorts() ? 'shorts-player' : 'movie_player'); } catch (e) { return null; } }
@@ -148,8 +201,6 @@
         let keep = F;
         if (O) {
             const ps = function (c) { const o = {}; F.forEach(function (t) { if (t.fam === c) o[t.p] = 1; }); return Object.keys(o).map(Number); };
-            const vidPs = {}; F.forEach(function (t) { vidPs[t.p] = 1; });
-            const nP = Object.keys(vidPs).length;
             const top = Math.max.apply(null, F.map(function (t) { return t.p; }));
             const sr = startRes(v);
             const ok = function (c) {
@@ -358,10 +409,10 @@
             });
         }
     } catch (e) {}
+    const NATIVE_PARSE = JSON.parse;                               // kept unhooked: see the fetch wrapper
     try {
-        const orig = JSON.parse;
         JSON.parse = function (text) {
-            const data = orig.apply(this, arguments);
+            const data = NATIVE_PARSE.apply(this, arguments);
             try { if (typeof text === 'string' && text.indexOf('"streamingData"') !== -1) prune(data); } catch (e) {}
             return data;
         };
@@ -376,9 +427,18 @@
                 if (url.indexOf('/youtubei/v1/player') === -1 && url.indexOf('/youtubei/v1/reel/') === -1) return response;
                 return response.clone().text().then(function (txt) {
                     if (txt.indexOf('"streamingData"') === -1) return response;
-                    const json = JSON.parse(txt);
+                    // parse with the NATIVE parse: through the hook the list would be trimmed once
+                    // already, and the second prune here would see "nothing to do" and hand the
+                    // player the untouched response — which is how SPA navigations kept the wrong codec.
+                    const json = NATIVE_PARSE(txt);
                     if (!prune(json)) return response;
-                    const out = new Response(JSON.stringify(json), { status: response.status, statusText: response.statusText, headers: response.headers });
+                    const hs = [];
+                    try { if (response.headers && response.headers.forEach) response.headers.forEach(function (v, k) {
+                        const lk = String(k).toLowerCase();
+                        if (lk === 'content-length' || lk === 'content-encoding' || lk === 'transfer-encoding') return;   // body was rewritten
+                        hs.push([k, v]);
+                    }); } catch (e) {}
+                    const out = new Response(JSON.stringify(json), { status: response.status, statusText: response.statusText, headers: hs });
                     try { Object.defineProperty(out, 'url', { value: response.url }); } catch (e) {}
                     return out;
                 }).catch(function () { return response; });
@@ -609,12 +669,14 @@
             localStorage.removeItem(YTQ_BK); localStorage.removeItem(YTQ_WR);
         } catch (e) {}
     }
-    let earlyFor = null;
+    let earlySig = null;
     function earlyStart() {
         const v = curVid();
-        if (!v || v === earlyFor) return;
-        earlyFor = v;
+        if (!v) return;
         const st = startRes(v);
+        const sig = v + '|' + st;                    // same video + same start quality = already prepared.
+        if (sig === earlySig) return;                // if the setting changed in between, coming back re-applies it
+        earlySig = sig;                              // (plain id tracking kept a stale quality on the same video)
         if (!st) { restoreYtq(); return; }
         writeYtq(Math.min(st, 4320));
         const p = playerEl(), q = qFor(st);
@@ -1171,7 +1233,7 @@
             if (v && p && typeof p.loadVideoById === 'function') {
                 let t = 0;
                 try { t = +p.getCurrentTime() || 0; } catch (e) {}
-                bufFor = null; resDoneFor = null; checkedFor = null; blockedFor = null; errorFor = null; earlyFor = null;
+                bufFor = null; resDoneFor = null; checkedFor = null; blockedFor = null; errorFor = null; earlySig = null;
                 try {                                           // give the player back the full list, trimmed for the NEW choice
                     const pr = playerResp(v);
                     if (pr && pr.streamingData && ORIG.has(v)) { pr.streamingData.adaptiveFormats = ORIG.get(v).slice(); prune(pr); }

@@ -1,4 +1,4 @@
-TubeDial — Smart Quality for YouTube   v1.0 (Brave / Chrome extension)
+TubeDial — Smart Quality for YouTube   v1.1 (Brave / Chrome / Firefox extension)
 =====================================================================
 
 Same quality for less data, smoother playback on older computers, or

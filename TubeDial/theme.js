@@ -1,4 +1,5 @@
 // Applies the saved theme before the popup paints (no white/black flash).
+// Made with the help of AI.
 (function () {
     var ui = { theme: 'system', accent: 'green' };
     try { var s = JSON.parse(localStorage.getItem('tdUi')); if (s) { ui.theme = s.theme || ui.theme; ui.accent = s.accent || ui.accent; } } catch (e) {}

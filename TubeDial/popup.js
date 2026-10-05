@@ -1,5 +1,6 @@
 // TubeDial popup. In the real extension it talks to the open YouTube tab;
 // opened anywhere else (e.g. a file preview) it runs a harmless demo.
+// Made with the help of AI.
 (function () {
     'use strict';
     // ================= CONSTANTS =================
@@ -66,7 +67,22 @@
     const pendingFlash = { video: new Set(), images: new Set() };
     let copySel = null;
     function P() { return S.profiles[editKind]; }
-    function store(patch) { Object.assign(S, patch); if (EXT) chrome.storage.local.set(patch); }
+    // The UI reads S directly, so painting stays instant; storage writes are batched (sliders
+    // fire per mouse-move) and always flushed synchronously before a soft reload or a close.
+    let pendS = null, storeT = 0;
+    function flushStore() {
+        if (storeT) { clearTimeout(storeT); storeT = 0; }
+        if (!pendS) return;
+        const p = pendS; pendS = null;
+        try { chrome.storage.local.set(p); } catch (e) {}
+    }
+    function store(patch) {
+        Object.assign(S, patch);
+        if (!EXT) return;
+        pendS = Object.assign(pendS || {}, patch);
+        if (!storeT) storeT = setTimeout(flushStore, 40);
+    }
+    try { window.addEventListener('pagehide', flushStore); } catch (e) {}
     function setProf(patch, kind) {
         const pr = clone(S.profiles);
         Object.assign(pr[kind || editKind], patch);
@@ -88,7 +104,11 @@
     }
     function segSet(el, value, attr) {
         attr = attr || 'v';
-        el.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset[attr] === String(value)); });
+        el.querySelectorAll('button').forEach(function (b) {
+            const on = b.dataset[attr] === String(value);
+            b.classList.toggle('on', on);
+            try { b.setAttribute('aria-pressed', String(on)); } catch (e) {}        // screen readers hear the choice
+        });
         pill(el);
     }
     function paintRange(el) {
@@ -138,35 +158,102 @@
     })();
     try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () { if (UI.theme === 'system') applyUi(); }); } catch (e) {}
 
-    // ================= SETTINGS MIGRATION =================
-    function migrate(s) {
-        s = s || {};
-        const o = Object.assign({}, DEFAULTS, s), patch = {};
-        delete o.ytldMemory;
-        if (s.perVideoFps && typeof s.perVideoFps === 'object') {
-            const pv = Object.assign({}, o.perVideo || {});
-            Object.keys(s.perVideoFps).forEach(function (k) { if (!pv[k]) pv[k] = { fps: s.perVideoFps[k] }; });
-            o.perVideo = pv; patch.perVideo = pv;
+    // ================= SETTINGS MIGRATION + SANITIZER =================
+    // Storage is treated as hostile input (same rules as the page engine): only the known keys
+    // survive, enums are whitelisted, numbers are clamped to values this UI can itself produce,
+    // and the result is built fresh, so an own __proto__ key or a getter can never poison
+    // anything. Clamping is idempotent: migrate(migrate(x)) keeps x's clean shape.
+    const RES_SET = [144, 240, 360, 480, 720, 1080, 1440, 2160, 4320];
+    const FPS_SET = [24, 25, 30, 48, 50, 60];
+    const AR_SET = [3, 5, 10, 15];
+    function sanNum(v, lo, hi, dflt) { const n = +v; if (!isFinite(n)) return dflt; const r = Math.round(n); return r < lo ? lo : r > hi ? hi : r; }
+    function floorIn(n, set, low) { for (let i = set.length - 1; i >= 0; i--) if (set[i] <= n) return set[i]; return low; }
+    function sanRes(v) { const n = sanNum(v, 0, 1e9, 0); return n <= 0 ? 0 : floorIn(n, RES_SET, RES_SET[0]); }
+    function sanFps(v, dflt) { const n = +v; if (!isFinite(n) || n <= 0) return dflt; return n >= 60 ? 60 : floorIn(n, FPS_SET, FPS_SET[0]); }
+    function sanAuto(v, dflt) { const n = sanNum(v, 0, 1e9, dflt); return n >= 15 ? 15 : n >= 1 ? floorIn(n, AR_SET, AR_SET[0]) : 0; }
+    const CODECS = { av1: 1, vp9: 1, avc: 1 };
+    function sanProf(base, src) {
+        const q = { codec1: base.codec1, codec2: base.codec2, startRes: base.startRes, maxFps: base.maxFps };
+        if (src && typeof src === 'object') {
+            if (src.codec1 === 'auto' || CODECS[src.codec1]) q.codec1 = src.codec1;
+            if (CODECS[src.codec2]) q.codec2 = src.codec2;
+            const lim = (src.resMode === 'start') ? 0 : +src.maxRes;                          // very old switch shapes
+            if (src.startRes !== undefined) q.startRes = sanRes(src.startRes);
+            else if ('maxRes' in src) q.startRes = sanRes(lim > 0 ? lim : 0);                  // old limit -> starting quality
+            q.maxFps = sanFps(src.maxFps, q.maxFps);
         }
-        let pr = s.profiles && typeof s.profiles === 'object' ? s.profiles : null;
+        return q;   // 'highest' and 'resMode' simply drop out: the object is rebuilt from these four fields only
+    }
+    function migrate(s) {
+        s = (s && typeof s === 'object') ? s : {};
+        const o = {}, patch = {};
+        let th = s.thumbH;
+        if (th === undefined && s.thumbQuality) { th = ({ '70p': 68, '180p': 180, '270p': 270, '360p': 360, 'original': 0 })[s.thumbQuality]; patch.thumbH = true; }
+        th = sanNum(th, -1e9, 99999, DEFAULTS.thumbH); o.thumbH = th < 0 ? DEFAULTS.thumbH : th;   // 0 = original; negatives are junk
+        if (patch.thumbH) patch.thumbH = o.thumbH;
+        let sth = s.shortsThumbH;
+        if (sth === undefined && s.shortsThumbQuality) { sth = ({ '90p': 90, '180p': 180, '360p': 360, '480p': 480, 'original': 0 })[s.shortsThumbQuality]; patch.shortsThumbH = true; }
+        sth = sanNum(sth, -1e9, 99999, DEFAULTS.shortsThumbH); o.shortsThumbH = sth < 0 ? DEFAULTS.shortsThumbH : sth;
+        if (patch.shortsThumbH) patch.shortsThumbH = o.shortsThumbH;
+        let pv = s.previewH;
+        if (pv === undefined && s.previewQuality) { pv = ({ '144p': 144, '240p': 240, '360p': 360, '480p': 480, '720p': 720, 'off': -1 })[s.previewQuality]; patch.previewH = true; }
+        pv = sanNum(pv, -1e9, 99999, DEFAULTS.previewH);                                // -1 = off, 0 = YouTube default
+        o.previewH = (pv === -1 || pv >= 0) ? pv : DEFAULTS.previewH;
+        if (patch.previewH) patch.previewH = o.previewH;
+        o.stillHover = typeof s.stillHover === 'boolean' ? s.stillHover : DEFAULTS.stillHover;
+        o.channelImages = typeof s.channelImages === 'boolean' ? s.channelImages : DEFAULTS.channelImages;
+        o.notices = typeof s.notices === 'boolean' ? s.notices : DEFAULTS.notices;
+        o.autoReloadSec = sanAuto(s.autoReloadSec, DEFAULTS.autoReloadSec);
+        let pr = (s.profiles && typeof s.profiles === 'object') ? s.profiles : null;
         if (!pr && (s.codec1 || s.maxRes || s.maxFps || s.av1 === false)) {
-            const b = { codec1: s.codec1 || (s.av1 === false ? 'auto' : 'av1'), codec2: s.codec2 || 'vp9', maxRes: +s.maxRes || 0, maxFps: +s.maxFps || 60 };
+            const b = { codec1: s.codec1 || (s.av1 === false ? 'auto' : 'av1'), codec2: s.codec2 || 'vp9', maxRes: s.maxRes, maxFps: s.maxFps };
             pr = { video: b, shorts: b, embed: b, live: Object.assign({}, b, { codec1: 'auto' }) };
             patch.profiles = true;
         }
+        const clean = (function () {
+            let legacy = false;
+            KINDS.forEach(function (k) {
+                const q = pr && pr[k];
+                if (!q || typeof q !== 'object') return;
+                if ('maxRes' in q || 'resMode' in q || 'highest' in q) legacy = true;         // old field names inside a profile
+            });
+            return legacy;
+        })();
         o.profiles = {};
-        let strip = false;
-        KINDS.forEach(function (k) {
-            const q = Object.assign({}, DEFAULTS.profiles[k], (pr && pr[k]) || {});
-            if (q.resMode === 'start') q.maxRes = 0;
-            if ('maxRes' in q) { if (!(pr && pr[k] && pr[k].startRes !== undefined)) q.startRes = +q.maxRes || 0; delete q.maxRes; strip = true; }   // old limit -> starting quality
-            if ('highest' in q || 'resMode' in q) { delete q.highest; delete q.resMode; strip = true; }
-            o.profiles[k] = q;
+        KINDS.forEach(function (k) { o.profiles[k] = sanProf(DEFAULTS.profiles[k], pr && pr[k]); });
+        if (patch.profiles || clean || (pr && JSON.stringify(o.profiles) !== JSON.stringify(pr))) patch.profiles = o.profiles;
+        o.perVideo = {};
+        const ID_RE = /^[A-Za-z0-9_-]{11}$/;
+        const pvs = (s.perVideo && typeof s.perVideo === 'object') ? s.perVideo : null;
+        const pvf = (s.perVideoFps && typeof s.perVideoFps === 'object') ? s.perVideoFps : null;   // v1 memory
+        let pvChanged = !!pvf;
+        let src = pvs || {};
+        if (pvf) { src = Object.assign({}, src); Object.keys(pvf).forEach(function (k) { if (!src[k]) src[k] = { fps: pvf[k] }; }); }
+        const same = function (e, q) {
+            const kq = Object.keys(q), ke = Object.keys(e);
+            if (kq.length !== ke.length) return false;
+            for (let i = 0; i < kq.length; i++) if (e[kq[i]] !== q[kq[i]]) return false;
+            return true;
+        };
+        const keys = Object.keys(src);
+        if (keys.length > 5000) pvChanged = true;
+        keys.slice(Math.max(0, keys.length - 5000)).forEach(function (k) {                   // newest 5000, id-shaped keys only
+            if (!ID_RE.test(k)) return;
+            const e = src[k];
+            if (!e || typeof e !== 'object') { pvChanged = true; return; }
+            const q = {};
+            if (CODECS[e.codec]) q.codec = e.codec;
+            const r = sanRes(e.res); if (r > 0) q.res = r;
+            const fr = +e.fps; if (isFinite(fr) && fr >= 1) q.fps = Math.min(240, Math.round(fr));       // 0/absent = "no override"
+            if (q.codec || q.res || q.fps) { o.perVideo[k] = q; if (!same(e, q)) pvChanged = true; }
+            else pvChanged = true;
         });
-        if (patch.profiles || strip) patch.profiles = o.profiles;
-        if (s.thumbH === undefined && s.thumbQuality) patch.thumbH = o.thumbH = ({ '70p': 68, '180p': 180, '270p': 270, '360p': 360, 'original': 0 })[s.thumbQuality] ?? DEFAULTS.thumbH;
-        if (s.shortsThumbH === undefined && s.shortsThumbQuality) patch.shortsThumbH = o.shortsThumbH = ({ '90p': 90, '180p': 180, '360p': 360, '480p': 480, 'original': 0 })[s.shortsThumbQuality] ?? DEFAULTS.shortsThumbH;
-        if (s.previewH === undefined && s.previewQuality) patch.previewH = o.previewH = ({ '144p': 144, '240p': 240, '360p': 360, '480p': 480, '720p': 720, 'off': 0 })[s.previewQuality] ?? DEFAULTS.previewH;
+        if (Object.keys(o.perVideo).length !== Math.min(keys.length, 5000)) pvChanged = true;
+        if (pvChanged) patch.perVideo = o.perVideo;
+        ['stillHover', 'channelImages', 'notices', 'autoReloadSec'].forEach(function (k) { if (s[k] !== undefined && s[k] !== o[k]) patch[k] = o[k]; });   // normalize garbage in storage once, quietly
+        if (s.thumbH !== undefined && s.thumbH !== o.thumbH) patch.thumbH = o.thumbH;
+        if (s.shortsThumbH !== undefined && s.shortsThumbH !== o.shortsThumbH) patch.shortsThumbH = o.shortsThumbH;
+        if (s.previewH !== undefined && s.previewH !== o.previewH) patch.previewH = o.previewH;
         if (EXT && Object.keys(patch).length) {
             chrome.storage.local.set(patch);
             chrome.storage.local.remove(['perVideoFps', 'av1', 'codec1', 'codec2', 'maxRes', 'maxFps', 'thumbQuality', 'shortsThumbQuality', 'previewQuality']);
@@ -184,11 +271,13 @@
     function probeDevice(cb) {
         const mc = navigator.mediaCapabilities;
         if (!mc || !mc.decodingInfo) { cb(null); return; }
-        const out = {}; let left = FAM.length;
+        const out = {}; let left = FAM.length, done = false;
+        const fin = function () { if (done) return; done = true; clearTimeout(t); cb(out); };
+        const t = setTimeout(fin, 4000);                    // never hang on "Checking…": some platforms don't answer
         FAM.forEach(function (c) {
             mc.decodingInfo({ type: 'media-source', video: { contentType: PROBES[c], width: 1920, height: 1080, bitrate: 4000000, framerate: 30 } })
                 .then(function (r) { out[c] = r; }, function () { out[c] = null; })
-                .then(function () { if (--left === 0) cb(out); });
+                .then(function () { if (--left === 0) fin(); }, function () {});
         });
     }
     // Smart / Best quality: avoid codecs this device can only decode in software at 1080p.
@@ -562,6 +651,7 @@
             b.dataset.v = it.v;
             if (it.dis) b.disabled = true;
             if (it.title) b.title = it.title;
+            try { b.setAttribute('aria-pressed', /\bon\b/.test(it.cls || '') ? 'true' : 'false'); } catch (e) {}
             b.appendChild(document.createTextNode(it.label));
             if (it.sub) b.appendChild(mk('small', null, it.sub));
             if (first) b.style.animation = 'slideIn .35s ' + (i * 0.035) + 's both';
@@ -589,6 +679,7 @@
     function softApply(msg) {
         if (!vid) return;
         if (!EXT) { toast(msg || 'Switching… (demo)'); return; }
+        flushStore();
         try {
             chrome.tabs.sendMessage(tabId, { kind: 'softReload', data: { settings: clone(S) } }, function (r) {
                 if (chrome.runtime.lastError || !r || !r.ok) { needReload(); return; }
@@ -975,6 +1066,7 @@
     function reloadTab() { if (EXT && tabId != null) chrome.tabs.reload(tabId); $('apply').classList.remove('show'); }
     $('applyBtn').addEventListener('click', function () {        // try in place first, full reload only if needed
         if (!EXT || tabId == null) { reloadTab(); return; }
+        flushStore();
         chrome.tabs.sendMessage(tabId, { kind: 'softReload', data: { settings: clone(S) } }, function (r) {
             if (chrome.runtime.lastError || !r || !r.ok) reloadTab();
             else { $('apply').classList.remove('show'); toast('Applied to this video'); setTimeout(refresh, 700); }
@@ -1031,6 +1123,7 @@
         if (s && s.ui) { UI = Object.assign(UI, s.ui); applyUi(); }
         S = migrate(s);
         delete S.ui;
+        try { $('ver').textContent = 'v' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?') + ' · No extra requests to YouTube'; } catch (e) {}
         chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
             const t = tabs && tabs[0];
             if (t && isYT(t.url)) { tabId = t.id; vid = vidFromUrl(t.url); }

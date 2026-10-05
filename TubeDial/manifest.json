@@ -2,8 +2,14 @@
   "manifest_version": 3,
   "name": "TubeDial — Smart Quality for YouTube",
   "short_name": "TubeDial",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Same quality for less data, smoother playback or always the best quality. Codec, resolution, thumbnail and preview controls.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tubedial@extension.invalid",
+      "strict_min_version": "114.0"
+    }
+  },
   "permissions": [
     "storage"
   ],
