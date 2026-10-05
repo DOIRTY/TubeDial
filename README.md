@@ -31,7 +31,9 @@ It doesn't block ads or download videos — it only chooses among the formats Yo
 
 ## Contributing
 
-Free for everyone: use it, change it, fix it, share it — no rules ([public domain](LICENSE)).
+Free for everyone, for anything: copy it, change it, fix it, rebrand it, **sell it** — the whole
+project is released to the public domain (Unlicense), and there is nothing left to ask permission for.
+Even the "Made with the help of AI" lines are just comments: reuse the code with or without them.
 Found a bug or have an idea? Open an [issue](../../issues). Want to improve it? Send a pull request.
 
 Tests: `cd tests && npm install && npm test` (engine, thumbnails, popup and fuzz suites — hostile
